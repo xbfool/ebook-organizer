@@ -1,0 +1,31 @@
+# 进度和日志文件
+*.db
+*.log
+*.txt
+!requirements.txt
+!README.md
+
+# Python缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 虚拟环境
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 测试文件
+test_*.py
+*_test.py

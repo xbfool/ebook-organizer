@@ -1,0 +1,56 @@
+{
+  "source_folders": [
+    "z:\\电子书\\日语\\已放入calibre",
+    "z:\\电子书\\英语书大全已放入calibre"
+  ],
+  "target_library": "z:\\电子书\\整理后书库",
+  "progress_db": "z:\\电子书\\ebook_organizer\\progress.db",
+  "log_file": "z:\\电子书\\ebook_organizer\\organize.log",
+  "error_file": "z:\\电子书\\ebook_organizer\\error_books.txt",
+
+  "use_calibre_db": false,
+  "calibre_library": "z:\\电子书\\calibre书库",
+  "metadata_db": "z:\\电子书\\calibre书库\\metadata.db",
+
+  "formats_priority": ["epub", "azw3", "mobi"],
+  "supported_formats": ["epub", "azw3", "mobi", "txt", "pdf"],
+  "txt_folder": "TXT文件",
+
+  "language_names": {
+    "jpn": "日文图书",
+    "eng": "英文图书",
+    "zho": "中文图书",
+    "unknown": "其他语言"
+  },
+
+  "japanese_categories": {
+    "light_novel": "ライトノベル",
+    "literature": "文芸",
+    "mystery": "ミステリー",
+    "scifi_fantasy": "SF・ファンタジー",
+    "other": "その他"
+  },
+
+  "english_categories": {
+    "fiction": "Fiction",
+    "non_fiction": "Non-Fiction",
+    "classics": "Classics"
+  },
+
+  "light_novel_keywords": [
+    "ライトノベル", "light novel", "ラノベ",
+    "電撃文庫", "角川文庫", "ファミ通文庫", "MF文庫",
+    "富士見ファンタジア", "GA文庫", "HJ文庫", "スニーカー文庫"
+  ],
+
+  "fiction_tags": {
+    "mystery": ["Mystery", "Detective", "Suspense", "Thrillers"],
+    "scifi": ["Science Fiction", "SF"],
+    "fantasy": ["Fantasy", "epic"],
+    "romance": ["Romance", "Contemporary"],
+    "horror": ["Horror"]
+  },
+
+  "max_path_length": 240,
+  "batch_size": 100
+}
