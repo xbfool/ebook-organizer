@@ -8,7 +8,8 @@
   "log_file": "z:\\电子书\\ebook_organizer\\organize.log",
   "error_file": "z:\\电子书\\ebook_organizer\\error_books.txt",
 
-  "use_calibre_db": false,
+  "use_calibre_db": true,
+  "source_library": "z:\\电子书\\calibre书库",
   "calibre_library": "z:\\电子书\\calibre书库",
   "metadata_db": "z:\\电子书\\calibre书库\\metadata.db",
 
