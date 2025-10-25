@@ -319,10 +319,208 @@ class MergedEbookOrganizer:
 
         return None
 
+    def _sanitize_filename(self, name: str) -> str:
+        """清理文件名中的非法字符"""
+        illegal_chars = r'<>:"/\|?*'
+        for char in illegal_chars:
+            name = name.replace(char, '_')
+        name = name.strip('. ')
+        if len(name) > 200:
+            name = name[:200]
+        return name
+
+    def _normalize_language(self, lang_code: str) -> str:
+        """标准化语言代码"""
+        if not lang_code or lang_code == 'unknown':
+            return 'unknown'
+
+        lang_code = lang_code.lower()
+
+        if lang_code in ('eng', 'en', 'english'):
+            return 'eng'
+        if lang_code in ('jpn', 'ja', 'japanese'):
+            return 'jpn'
+        if lang_code in ('zho', 'zh', 'chi', 'chinese', 'cmn'):
+            return 'zho'
+
+        # 其他欧洲语言映射到英文
+        if lang_code in ('deu', 'de', 'fra', 'fr', 'spa', 'es', 'ita', 'it', 'por', 'pt', 'rus', 'ru'):
+            return 'eng'
+
+        return 'unknown'
+
+    def _get_author_date_prefix(self, author: str) -> str:
+        """获取作者日期前缀"""
+        if author in self.author_date_cache:
+            return self.author_date_cache[author]
+
+        # 暂时使用未知，后续可以从数据库或文件提取
+        prefix = "[未知]"
+        self.author_date_cache[author] = prefix
+        return prefix
+
+    def _build_target_path(self, metadata: Dict, language: str) -> str:
+        """构建目标路径"""
+        lang_folder = self.config['language_names'].get(language, '其他语言')
+
+        # 获取作者
+        authors = metadata.get('authors', [])
+        if authors:
+            if isinstance(authors[0], tuple):
+                author = authors[0][1]  # Calibre格式: (id, name)
+            else:
+                author = authors[0]
+        else:
+            author = "未知"
+
+        date_prefix = self._get_author_date_prefix(author)
+        author_folder = f"{date_prefix} {self._sanitize_filename(author)}"
+
+        # 获取书名
+        title = metadata.get('title', 'Unknown')
+
+        # 简化分类
+        if language == 'jpn':
+            category = 'その他'
+        elif language == 'eng':
+            category = 'Fiction'
+        else:
+            category = '其他'
+
+        # 构建路径
+        base_path = os.path.join(
+            self.config['target_library'],
+            lang_folder,
+            category,
+            author_folder,
+            self._sanitize_filename(title)
+        )
+
+        return base_path
+
+    def _copy_file(self, source_file: str, target_base: str, filename: str, dry_run: bool) -> bool:
+        """复制单个文件"""
+        try:
+            target_file = os.path.join(target_base, filename)
+
+            if dry_run:
+                self.logger.info(f"[DRY RUN] {source_file} -> {target_file}")
+            else:
+                os.makedirs(target_base, exist_ok=True)
+                shutil.copy2(source_file, target_file)
+                self.logger.info(f"Copied: {target_file}")
+
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to copy {source_file}: {e}")
+            return False
+
     def process_item(self, source_type: str, source_id: str, dry_run: bool = False) -> bool:
-        """处理单个项目"""
-        # TODO: 实现处理逻辑（下一步）
-        pass
+        """
+        处理单个项目
+
+        Args:
+            source_type: 'calibre' 或 'filesystem'
+            source_id: 书籍ID或文件路径
+            dry_run: 是否为干运行
+
+        Returns:
+            是否成功
+        """
+        try:
+            # 获取文件路径和元数据
+            if source_type == 'calibre':
+                # 从Calibre数据库获取
+                book_id, fmt = source_id.split('_')
+                book_id = int(book_id)
+
+                cursor = self.calibre_db.cursor()
+                cursor.execute('SELECT title, path FROM books WHERE id = ?', (book_id,))
+                result = cursor.fetchone()
+
+                if not result:
+                    self.logger.error(f"Book {book_id} not found in Calibre DB")
+                    self.progress.update_status(source_type, source_id, 'failed', error='Not found')
+                    return False
+
+                title, path = result
+                source_file = os.path.join(self.config['calibre_library'], path, f"{Path(path).name}.{fmt.lower()}")
+
+                # 获取作者
+                cursor.execute('''
+                    SELECT a.name
+                    FROM authors a
+                    JOIN books_authors_link bal ON a.id = bal.author
+                    WHERE bal.book = ?
+                    LIMIT 1
+                ''', (book_id,))
+                author_result = cursor.fetchone()
+                authors = [author_result[0]] if author_result else []
+
+                # 获取语言
+                cursor.execute('''
+                    SELECT l.lang_code
+                    FROM books_languages_link bl
+                    JOIN languages l ON bl.lang_code = l.id
+                    WHERE bl.book = ?
+                    LIMIT 1
+                ''', (book_id,))
+                lang_result = cursor.fetchone()
+                language = self._normalize_language(lang_result[0] if lang_result else 'unknown')
+
+                metadata = {'title': title, 'authors': authors}
+
+            else:  # filesystem
+                source_file = source_id
+                file_ext = Path(source_file).suffix.lower().lstrip('.')
+
+                # 从文件提取元数据
+                metadata = self.parser.get_metadata(source_file, file_ext)
+                language = self._normalize_language(metadata.get('language', 'unknown'))
+
+                if language == 'unknown':
+                    # 从文件名推断
+                    language = self.parser.detect_language_from_content(Path(source_file).stem)
+                    language = self._normalize_language(language)
+
+            # 检查文件是否存在
+            if not os.path.exists(source_file):
+                self.logger.warning(f"Source file not found: {source_file}")
+                self.progress.update_status(source_type, source_id, 'failed', error='File not found')
+                return False
+
+            # 创建指纹并检查重复
+            fingerprint = BookFingerprint(source_file)
+            duplicate_of = self._is_duplicate_of_processed(fingerprint)
+
+            if duplicate_of:
+                self.logger.info(f"Duplicate file skipped: {source_file} (duplicate of {duplicate_of})")
+                self.progress.update_status(source_type, source_id, 'success',
+                                          is_duplicate=True, duplicate_of=duplicate_of)
+                return True
+
+            # TXT文件特殊处理
+            if Path(source_file).suffix.lower() == '.txt':
+                txt_folder = os.path.join(self.config['target_library'], self.config['txt_folder'])
+                success = self._copy_file(source_file, txt_folder, Path(source_file).name, dry_run)
+            else:
+                # 构建目标路径
+                target_base = self._build_target_path(metadata, language)
+                success = self._copy_file(source_file, target_base, Path(source_file).name, dry_run)
+
+            if success:
+                # 添加到指纹缓存
+                self.fingerprint_cache[source_file] = fingerprint
+                self.progress.update_status(source_type, source_id, 'success', target_path=target_base)
+                return True
+            else:
+                self.progress.update_status(source_type, source_id, 'failed', error='Copy failed')
+                return False
+
+        except Exception as e:
+            self.logger.error(f"Error processing {source_type}:{source_id}: {e}", exc_info=True)
+            self.progress.update_status(source_type, source_id, 'failed', error=str(e))
+            return False
 
     def run(self, dry_run: bool = False, limit: int = None, resume: bool = False):
         """运行整合整理任务"""
@@ -331,17 +529,36 @@ class MergedEbookOrganizer:
             calibre_count, fs_count = self.scan_all_sources()
 
         pending_items = self.progress.get_pending_items()
+        total_pending = len(pending_items)
+
         if limit:
             pending_items = pending_items[:limit]
 
-        self.logger.info(f"Processing {len(pending_items)} items...")
+        self.logger.info(f"Processing {len(pending_items)} items (Total pending: {total_pending})...")
 
-        # TODO: 实际处理逻辑
+        success_count = 0
+        failed_count = 0
 
+        for idx, (source_type, source_id) in enumerate(pending_items, 1):
+            self.logger.info(f"[{idx}/{len(pending_items)}] Processing {source_type}:{source_id}")
+
+            if self.process_item(source_type, source_id, dry_run):
+                success_count += 1
+            else:
+                failed_count += 1
+
+            # 每50项输出一次进度
+            if idx % 50 == 0:
+                self.logger.info(f"Progress: {idx}/{len(pending_items)} | Success: {success_count} | Failed: {failed_count}")
+
+        # 最终统计
         stats = self.progress.get_statistics()
         self.logger.info("="*60)
-        self.logger.info(f"Total: {stats['total']}, Success: {stats['success']}, "
-                        f"Failed: {stats['failed']}, Duplicates: {stats['duplicates']}")
+        self.logger.info("Merged organization completed!")
+        self.logger.info(f"Total: {stats['total']}")
+        self.logger.info(f"Success: {stats['success']}")
+        self.logger.info(f"Failed: {stats['failed']}")
+        self.logger.info(f"Duplicates: {stats['duplicates']}")
         self.logger.info("="*60)
 
     def close(self):
